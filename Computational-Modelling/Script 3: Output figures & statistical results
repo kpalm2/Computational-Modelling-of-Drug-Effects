@@ -1,6 +1,29 @@
+### Assessing AUC score and model performance
+
+# create an empty data frame with 1000 rows to store the AUC values
+AUC_df <- data.frame(matrix(ncol = 1, nrow = 1000))
+#extract values
+AUC_df <- data.frame(AUC = unlist(lapply(AUC_Res, function(x) x)))
+#Accuracy_model_df<-data.frame(Acuraccy = unlist(lapply(Accuracy_model, function(x) x)))
+median<-round(median(AUC_df$AUC),digits = 2)
+print(paste0("model mean AUC:",mean(AUC_df$AUC)))
+print(paste0("model median AUC:",median(AUC_df$AUC)))
+
+
+#plot density plot of AUC results
+AUC_density_plot<-ggplot(AUC_df, aes(x=AUC)) + 
+ geom_density(alpha=.2, fill="#FF6666")+geom_vline(data=AUC_df, aes(xintercept=(mean(AUC)),linetype="mean"), color="blue") +geom_vline(data=AUC_df, aes(xintercept=(median(AUC)),linetype="median"), color="red")+labs(title=paste0("Assessing model performance with AUC results. Median AUC=",median, " with average Ngenes per iteration=",round(model_genes)))
+
+#plot AUC density plot
+AUC_density_plot
+
+
+
+### Visualizing plaque shift using ggalluvial
 library(ggalluvial)
-## output Figures and statistical results ##
-### gather all results tables to combine in final average result table ##3
+
+#Res_pred<-Varmodel$Res_pred
+## gather all results tables to combine in "COMBINING PERMUTED RESULTS TABLES"
 table_Res_pred<-list()
 for (i in 1:length(Res_pred)){
   table<-table(Res_pred[[i]]$cluster, Res_pred[[i]]$predicted_cluster)
@@ -9,6 +32,7 @@ for (i in 1:length(Res_pred)){
 # Extract the 5x5 tables from the list
 table_5x5_list <- lapply(table_Res_pred, function(x) if(all(dim(x) == c(5,5))) x else NULL)
 table_5x5_list <- table_5x5_list[!sapply(table_5x5_list, is.null)]
+
 
 # Combine the 5x5 tables into a single table
 combined_list<-c(table_5x5_list)
@@ -21,8 +45,8 @@ after <- colSums(combined_table)  # Sums of each row
 Before <- rowSums(combined_table)  # Sums of each column
 observed <- rbind(Before, after)
 
-# Perform chi-squared test to assess if there are any signficant differences in the proportions of plaque subtypes before and after in-silico treatment.
-chi_squared_test <- chisq.test(observed)
+# StuartMaxwelltest test to assess if there are any signficant differences in the proportions of plaque subtypes before and after in-silico treatment.
+test<-StuartMaxwellTest(combined_table)
 
 ##plotting results in Alluvial plot for plaque subtype specific changes##
 
