@@ -21,7 +21,8 @@ ggplot2 3.5.1
 dplyr 1.1.4
 
 Figure 1 Overview of model building 
-![VAR flow chart-4](https://github.com/user-attachments/assets/0cf59108-5537-429f-95d7-3ff7deebbc78)
+<img width="4100" height="4584" alt="General Drug VAR flowchart" src="https://github.com/user-attachments/assets/c2a0e9b4-23d5-449a-9b6e-386a4fb06924" />
+
 Numbered boxes indicate corresponding phase in step-by-step description. 
 
 ## Getting started: step by step description 
@@ -59,7 +60,8 @@ This data frame represents data after simulated (in-silico) treatment. It will b
  
 
 Figure 2: Zoomed-in overview of model building and performance evaluation 
-![Var model building and QC-5](https://github.com/user-attachments/assets/b393c3b8-ef53-4794-8484-aece84a58182)
+<img width="2563" height="2897" alt="Var model building and QC" src="https://github.com/user-attachments/assets/65e86357-949c-4565-b238-f384e836b8ee" />
+
 
 ## Model results & visualization (script 3)
 6. Differences in the proportion of plaque subtype before and after in-silico treatment were assessed Stuart-Maxwell or McNemar’s Chi-squared test, which evaluates paired data to determine whether the observed shifts (e.g, from more vulnerable to less vulnerable plaques) are meaningful. To further interpret results, odds ratios (ORs) were calculated by dividing the number of plaques for a group of interest before in-silico treatment (e.g., plaque subtype 2) by the number of plaques predicted to shift after in-silico treatment. ORs were subsequently log-transformed, where values > 0 represent a higher log odd for that selected group of interest. Corresponding confidence intervals were calculated using standard formulas and p-values were derived from McNemar's Chi-squared test. To assess the magnitude of the drug effect on plaque subtype reclassification, net marginal change for each subtype was calculated as the difference between the number of patients transitioning into and out of that subtype. Then, net percentage change (NPC) was calculated by dividing the net transition count by the total study population. Plaque shifts before and after in-silico treatments were visualized using galluvial 0.12.5 package. 
@@ -88,7 +90,7 @@ Formulas used to calculate Odds ratios and corresponding upper and lower CIs:
    \text{Upper CI} = \exp(\log(\text{OR}) + 1.96 \times \text{SE}_{\log(\text{OR})})
    $$
 
-# RF Output
+# RF Example Output
 
 ![image](https://github.com/user-attachments/assets/3faa77ec-978b-4137-af16-4f63c2fe438e)
 
