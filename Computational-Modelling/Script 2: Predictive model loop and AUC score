@@ -1,42 +1,63 @@
+##permute test and train data
 library(progress)
+library(doSNOW)
+library(doParallel)
+library(foreach)
 library(pROC)
 library(caret)
 library(glmnet)
 library(randomForest)
 library(EnsDb.Hsapiens.v86)
-library(dplyr)
 
 ##data prep and creation of empty lists for storage
 set.seed(123)
 index_Perm <- createDataPartition(y = data$cluster,  p = 0.8, times = 1000, list = TRUE)
-n_permutations<-1000
-pb <- progress_bar$new(total = n_permutations, format = "[:bar] :percent eta: :eta")
-Confusionres<- list()
-AUC_Res<-list()
-Features<-list()
-Res_pred<-list()
-Accuracy_model<-list()
-Pred_model<-list()
-selected_genes<-list()
-#predictions<- list()
+n_permutations<-10
 
 
-##loop N=1000
-for (i in 1:length(index_Perm)) {
-  #run permutation indexes into training and testdata
-  library(caret)
-  set.seed(123) 
-  train_data <- data[index_Perm[[i]], ]
-  test_data <- data[-index_Perm[[i]], ]
-  Traincluster<-train_data$cluster
-  Testcluster<- test_data$cluster
+
+n_cores <- parallel::detectCores() - 3 #three less than total detected cores
+cl <- makeCluster(n_cores)
+registerDoSNOW(cl)
+
+# Set up environment to store time and iteration count
+progress_env <- new.env()
+progress_env$start_time <- Sys.time()
+progress_env$done <- 0
+
+# Progress function with ETA
+progress_eta <- function(n) {
+  progress_env$done <- progress_env$done + 1
+  elapsed <- as.numeric(Sys.time() - progress_env$start_time, units = "secs")
+  avg_time <- elapsed / progress_env$done
+  remaining <- avg_time * (n_permutations - progress_env$done)
   
-  #remove cluster variable from train and test data
-  train_data <- train_data[, -which(names(train_data) == "cluster")]
-  test_data <- test_data[, -which(names(test_data) == "cluster")]
+  # Smart unit selection
+  if (remaining < 60) {
+    cat(sprintf("\rProgress: %d/%d | ETA: ~%.1f sec remaining", 
+                progress_env$done, n_permutations, remaining))
+  } else if (remaining < 3600) {
+    cat(sprintf("\rProgress: %d/%d | ETA: ~%.1f min remaining", 
+                progress_env$done, n_permutations, remaining / 60))
+  } else {
+    cat(sprintf("\rProgress: %d/%d | ETA: ~%.2f hr remaining", 
+                progress_env$done, n_permutations, remaining / 3600))
+  }
+  
+  flush.console()
+}
+#pb <- txtProgressBar(min = 0, max = n_permutations, style = 3)
+#progress <- function(n) setTxtProgressBar(pb, n)
+# Set options
+opts <- list(progress = progress_eta)
 
-  Lasso <- cv.glmnet(as.matrix(train_data[, -1]), Traincluster, alpha = 1, family = "multinomial")
-  Features[[i]]<-Lasso ##STORE FEATURE SELECTIONS
+set.seed(123)
+  
+results <- foreach(i = 1:n_permutations, .options.snow=opts, .packages = c("glmnet", "randomForest", "ensembldb", "EnsDb.Hsapiens.v86", "pROC", "dplyr", "tibble")) %dopar% {
+      train_data <- data[index_Perm[[i]], ]
+      test_data <- data[-index_Perm[[i]], ]
+
+  Lasso <- cv.glmnet(as.matrix(train_data[,-which(names(train_data) %in% c("cluster", "STUDY_NUMBER"))]), train_data$cluster, alpha = 1, family = "multinomial")
   
   #select features based on best Lambda
   best_lambda <- Lasso$lambda.min
@@ -46,28 +67,23 @@ for (i in 1:length(index_Perm)) {
   
   all_selected_features <- unique(unlist(lapply(coefficients, function(x) which(x[-1, ] != 0))))
   
-  train_data_selected <- cbind(Traincluster, train_data[, all_selected_features]) #editing df to contain only selected features
-  test_data_selected <- cbind(Testcluster, test_data[, all_selected_features])#editing df to contain only selected features
+  train_data_selected <- train_data[, colnames(train_data) %in% c("STUDY_NUMBER", "cluster", all_selected_features)]  #editing df to contain only selected features
+  test_data_selected <- test_data[, colnames(test_data) %in% c("STUDY_NUMBER","cluster", all_selected_features)] #editing df to contain only selected features and 
   
-  symbols_features<-as.data.frame(names(train_data_selected)[grep("^ENSG", names(train_data_selected))])
-  colnames(symbols_features)<-c("gene")
-  
-  symbols_features <- ensembldb::select(EnsDb.Hsapiens.v86, keys = symbols_features$gene, keytype = "GENEID", columns = "SYMBOL")
-  selected_genes[[i]]<-symbols_features #storing features with ENSEMBLE IDs
+  symbols_features <- ensembldb::select(EnsDb.Hsapiens.v86, keys = all_selected_features, keytype = "GENEID", columns = "SYMBOL")
   
   ###Start training of Random forest multi-class classification model
-  Fitmodel <- randomForest(factor(Traincluster) ~ ., data =  train_data_selected[,-(1:2)],replace= F, ntree=100, mtry=8, importance=TRUE, proximity= TRUE)   #random forrest
-  Pred_model[[i]]<-Fitmodel
+  Fitmodel <- randomForest(y=factor(train_data_selected$cluster), x=as.matrix(train_data_selected[,-which(names(train_data_selected) %in% c("cluster", "STUDY_NUMBER"))]), importance = TRUE, proximity = TRUE, ntree=100, mtry=8, replace=F)
 
   ##Testing trained model with testing subset 
-  predictions_test <- predict(Fitmodel, newdata = test_data_selected[,-(1:2)])
+  predictions_test <- predict(Fitmodel, newdata = test_data_selected[, -which(names(test_data_selected) %in% c("cluster", "STUDY_NUMBER"))])
   test_data_selected<-as.data.frame(test_data_selected)
-  confusion_matrix <- table(predictions_test, test_data_selected$Testcluster)
+  confusion_matrix <- table(predictions_test, test_data_selected$cluster)
  
-  df<-data.frame( test_data_selected$Testcluster, predictions_test)
+  df<-data.frame( test_data_selected$cluster, predictions_test)
   
   ## Assesing model accuracy with AUC ROC score and store results
-  AUC_Res[[i]]<-auc(multiclass.roc(as.numeric(test_data_selected$Testcluster), as.numeric(predictions_test)))
+  AUC_Res<-auc(multiclass.roc(as.numeric(test_data_selected$cluster), as.numeric(predictions_test)))
   
   ##making prediction with pertubred data (after in-silico treatment "ExpNew")
   pred_ExpNew<-predict(Fitmodel, newdata = ExpNew, type = "class")
@@ -84,30 +100,38 @@ for (i in 1:length(index_Perm)) {
   
   before<-dplyr::select(raw.genecounts_Cluster, "study_number", "cluster")
   Result<-merge(before, res, by="study_number")
-  Res_pred[[i]]<-Result
 
-  # update progress bar
-  pb$tick()
+  list(
+      Features = Lasso,
+      selected_genes = symbols_features,
+      Pred_model = Fitmodel,
+      Accuracy_model = accuracy,
+      AUC_Res = AUC_Res,     # Store AUC safely
+      Res_pred = Result)
 }
 
+stopCluster(cl)
 
-###Assesing model performance with AUC score ###
-### create an empty dataframe with 1000 rows to store the AUC values
-AUC_df <- data.frame(matrix(ncol = 1, nrow = 1000))
-AUC_df <- data.frame(AUC = unlist(lapply(AUC_Res, function(x) x)))
-Accuracy_model_df<-data.frame(Acuraccy = unlist(lapply(Accuracy_model, function(x) x)))
+# Final summary
+end_time <- Sys.time()
+total_elapsed <- as.numeric(end_time - progress_env$start_time, units = "secs")
 
-##AUC density plot to assess average model performance. an average performance of 75% or higher is concidered a strong performing model after 1000 iterations
-AUC_density_plot <- ggplot(AUC_df, aes(x = AUC)) + 
-  geom_density(alpha = .2, fill = "#FF6666") +
-  geom_vline(data = AUC_df, aes(xintercept = mean(AUC), linetype = "mean"), color = "blue") +
-  geom_vline(data = AUC_df, aes(xintercept = median(AUC), linetype = "median"), color = "red") +
-  labs(title = "Trained-model performance accuracy") +
-  theme(
-    plot.title = element_text(size = 20, face = "bold"),  # Title font size
-    axis.title.x = element_text(size = 16),               # X-axis label font size
-    axis.title.y = element_text(size = 16),               # Y-axis label font size
-    axis.text.x = element_text(size = 14),                # X-axis tick labels font size
-    axis.text.y = element_text(size = 14)                 # Y-axis tick labels font size
-  )
-AUC_density_plot
+# Format nicely based on duration
+if (total_elapsed < 60) {
+  duration_str <- sprintf("%.1f seconds", total_elapsed)
+} else if (total_elapsed < 3600) {
+  duration_str <- sprintf("%.1f minutes", total_elapsed / 60)
+} else {
+  duration_str <- sprintf("%.2f hours", total_elapsed / 3600)
+}
+
+cat(sprintf("\n✅ Done! Total elapsed time: %s\nFinished at: %s\n",
+            duration_str, format(end_time, "%H:%M:%S")))
+
+##extract results
+Features       <- lapply(results, `[[`, "Features")
+selected_genes <- lapply(results, `[[`, "selected_genes")
+Pred_model     <- lapply(results, `[[`, "Pred_model")
+Accuracy_model <- lapply(results, `[[`, "Accuracy_model")
+AUC_Res        <- lapply(results, `[[`, "AUC_Res")
+Res_pred       <- lapply(results, `[[`, "Res_pred")
